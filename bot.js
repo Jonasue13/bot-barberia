@@ -26,6 +26,7 @@ sock.ev.on("connection.update", (update) => {
 const { connection, qr } = update
 
 if(qr){
+console.log("QR generado")
 qrcode.generate(qr,{small:true})
 }
 
@@ -78,7 +79,7 @@ if(text === "1"){
 
 estados[from].paso = "nombre"
 
-return sock.sendMessage(from,{text:"¿Cuál es tu nombre?"})
+return sock.sendMessage(from,{text:"¿Cuál es tu nombre y apellido?"})
 }
 
 if(text === "2"){
@@ -110,9 +111,9 @@ if(text === "3"){
 return sock.sendMessage(from,{
 text:`💈 Precios
 
-Corte: $10
-Barba: $5
-Corte + Barba: $15`
+Corte: Q20.00 A veces de pender del tipo de corte
+Barba: Q15.00
+Corte + Barba: Q30.00 A veces de pender del tipo de corte`
 })
 
 }
