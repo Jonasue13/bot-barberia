@@ -156,4 +156,8 @@ Hora: ${cita.hora}`
 
 }
 
-startBot().catch(err => console.log(err))
+startBot()
+
+setInterval(() => {
+    console.log("Bot activo...")
+}, 30000)
