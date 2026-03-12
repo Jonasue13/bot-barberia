@@ -1,173 +1,158 @@
-console.log("Iniciando bot...")
-
 const { default: makeWASocket, useMultiFileAuthState } = require("@whiskeysockets/baileys")
-const { default: makeWASocket, useMultiFileAuthState } = require("@whiskeysockets/baileys")
-const { DisconnectReason } = require("@whiskeysockets/baileys")
 const qrcode = require("qrcode-terminal")
 const P = require("pino")
 const fs = require("fs")
 
+console.log("Iniciando bot barbería...")
+
 const citasFile = "citas.json"
 
-if(!fs.existsSync(citasFile)){
+if (!fs.existsSync(citasFile)) {
     fs.writeFileSync(citasFile, JSON.stringify([]))
 }
 
-async function startBot(){
+async function startBot() {
 
-const { state, saveCreds } = await useMultiFileAuthState("session")
+    const { state, saveCreds } = await useMultiFileAuthState("session")
 
-const sock = makeWASocket({
-logger: P({ level: "silent" }),
-auth: state
-})
+    const sock = makeWASocket({
+        logger: P({ level: "silent" }),
+        auth: state
+    })
 
-sock.ev.on("creds.update", saveCreds)
+    sock.ev.on("creds.update", saveCreds)
 
-sock.ev.on("connection.update", (update) => {
+    sock.ev.on("connection.update", ({ connection, qr }) => {
 
-const { connection, qr } = update
+        if (qr) {
+            console.log("Escanea este QR con WhatsApp")
+            qrcode.generate(qr, { small: true })
+        }
 
-if(qr){
-console.log("QR generado")
-qrcode.generate(qr,{small:true})
-}
+        if (connection === "open") {
+            console.log("Bot conectado a WhatsApp")
+        }
 
-if(connection === "open"){
-console.log("Bot conectado")
-}
+    })
 
-})
+    let estados = {}
 
-let estados = {}
+    sock.ev.on("messages.upsert", async ({ messages }) => {
 
-sock.ev.on("messages.upsert", async ({ messages }) => {
+        const msg = messages[0]
 
-const msg = messages[0]
+        if (!msg.message) return
 
-if(!msg.message) return
+        const from = msg.key.remoteJid
 
-const from = msg.key.remoteJid
+        const text =
+            msg.message.conversation ||
+            msg.message.extendedTextMessage?.text
 
-const text =
-msg.message.conversation ||
-msg.message.extendedTextMessage?.text
+        if (!text) return
 
-if(!text) return
+        if (!estados[from]) {
 
-if(!estados[from]){
+            if (text.toLowerCase() === "hola" || text === "menu") {
 
-if(text.toLowerCase() === "hola" || text === "menu"){
+                estados[from] = { paso: "menu" }
 
-estados[from] = { paso:"menu" }
-
-return sock.sendMessage(from,{
-text:`💈 Barbería
+                return sock.sendMessage(from, {
+                    text: `💈 *Barbería*
 
 1️⃣ Agendar cita
-2️⃣ Ver horarios disponibles
-3️⃣ Precios`
-})
+2️⃣ Ver precios`
+                })
+            }
 
-}
+            return
+        }
 
-return
-}
+        const estado = estados[from]
 
-const estado = estados[from]
+        if (estado.paso === "menu") {
 
-if(estado.paso === "menu"){
+            if (text === "1") {
 
-if(text === "1"){
+                estado.paso = "nombre"
 
-estados[from].paso = "nombre"
+                return sock.sendMessage(from, {
+                    text: "Escribe tu *nombre y apellido*"
+                })
+            }
 
-return sock.sendMessage(from,{text:"¿Cuál es tu nombre y apellido?"})
-}
+            if (text === "2") {
 
-if(text === "2"){
+                return sock.sendMessage(from, {
+                    text: `💈 Precios
 
-const citas = JSON.parse(fs.readFileSync(citasFile))
+Corte: $10
+Barba: $5
+Corte + Barba: $15`
+                })
+            }
 
-let horarios = []
+        }
 
-for(let h=9; h<19; h++){
+        if (estado.paso === "nombre") {
 
-let hora = `${h}:00`
+            estado.nombre = text
+            estado.paso = "fecha"
 
-let ocupado = citas.find(c=>c.hora === hora)
+            return sock.sendMessage(from, {
+                text: "¿Qué *fecha* deseas?\nEjemplo: 25/03/2026"
+            })
+        }
 
-if(!ocupado){
-horarios.push(hora)
-}
+        if (estado.paso === "fecha") {
 
-}
+            estado.fecha = text
+            estado.paso = "hora"
 
-return sock.sendMessage(from,{
-text:`Horarios disponibles:\n${horarios.join("\n")}`
-})
+            return sock.sendMessage(from, {
+                text: "¿Qué *hora* deseas?\nEjemplo: 10:00"
+            })
+        }
 
-}
+        if (estado.paso === "hora") {
 
-if(text === "3"){
+            let citas = JSON.parse(fs.readFileSync(citasFile))
 
-return sock.sendMessage(from,{
-text:`💈 Precios
+            let ocupado = citas.find(c =>
+                c.fecha === estado.fecha && c.hora === text
+            )
 
-Corte: Q20.00 A veces de pender del tipo de corte
-Barba: Q15.00
-Corte + Barba: Q30.00 A veces de pender del tipo de corte`
-})
+            if (ocupado) {
 
-}
+                return sock.sendMessage(from, {
+                    text: "❌ Ese horario ya está ocupado"
+                })
+            }
 
-}
+            const cita = {
+                nombre: estado.nombre,
+                fecha: estado.fecha,
+                hora: text,
+                telefono: from
+            }
 
-if(estado.paso === "nombre"){
+            citas.push(cita)
 
-estado.nombre = text
-estado.paso = "hora"
+            fs.writeFileSync(citasFile, JSON.stringify(citas, null, 2))
 
-return sock.sendMessage(from,{
-text:"¿Qué hora deseas? (ejemplo 10:00)"
-})
+            delete estados[from]
 
-}
+            return sock.sendMessage(from, {
+                text: `✅ *Cita confirmada*
 
-if(estado.paso === "hora"){
+Cliente: ${cita.nombre}
+Fecha: ${cita.fecha}
+Hora: ${cita.hora}`
+            })
 
-let citas = JSON.parse(fs.readFileSync(citasFile))
+        }
 
-let ocupado = citas.find(c=>c.hora === text)
-
-if(ocupado){
-
-return sock.sendMessage(from,{
-text:"❌ Esa hora ya está ocupada"
-})
-
-}
-
-const cita = {
-nombre: estado.nombre,
-hora: text,
-telefono: from
-}
-
-citas.push(cita)
-
-fs.writeFileSync(citasFile, JSON.stringify(citas,null,2))
-
-delete estados[from]
-
-return sock.sendMessage(from,{
-text:`✅ Cita confirmada
-Hora: ${text}`
-})
-
-}
-
-})
+    })
 
 }
 
