@@ -1,226 +1,170 @@
-const OpenAI = require("openai")
-const cron = require("node-cron")
-const openai = new OpenAI({
-apiKey: process.env.OPENAI_KEY
-})
-const { Client, LocalAuth } = require("whatsapp-web.js")
+const { default: makeWASocket, useMultiFileAuthState } = require("@whiskeysockets/baileys")
+const { DisconnectReason } = require("@whiskeysockets/baileys")
 const qrcode = require("qrcode-terminal")
+const P = require("pino")
 const fs = require("fs")
 
-const client = new Client({
-authStrategy: new LocalAuth()
+const citasFile = "citas.json"
+
+if(!fs.existsSync(citasFile)){
+    fs.writeFileSync(citasFile, JSON.stringify([]))
+}
+
+async function startBot(){
+
+const { state, saveCreds } = await useMultiFileAuthState("session")
+
+const sock = makeWASocket({
+logger: P({ level: "silent" }),
+auth: state
+})
+
+sock.ev.on("creds.update", saveCreds)
+
+sock.ev.on("connection.update", (update) => {
+
+const { connection, qr } = update
+
+if(qr){
+qrcode.generate(qr,{small:true})
+}
+
+if(connection === "open"){
+console.log("Bot conectado")
+}
+
 })
 
 let estados = {}
 
-function generarHorarios(){
+sock.ev.on("messages.upsert", async ({ messages }) => {
 
-let horarios=[]
-let inicio=9
-let fin=19
-let minutos=0
+const msg = messages[0]
 
-while(inicio < fin){
+if(!msg.message) return
 
-let hora = `${String(inicio).padStart(2,'0')}:${String(minutos).padStart(2,'0')}`
+const from = msg.key.remoteJid
 
+const text =
+msg.message.conversation ||
+msg.message.extendedTextMessage?.text
+
+if(!text) return
+
+if(!estados[from]){
+
+if(text.toLowerCase() === "hola" || text === "menu"){
+
+estados[from] = { paso:"menu" }
+
+return sock.sendMessage(from,{
+text:`💈 Barbería
+
+1️⃣ Agendar cita
+2️⃣ Ver horarios disponibles
+3️⃣ Precios`
+})
+
+}
+
+return
+}
+
+const estado = estados[from]
+
+if(estado.paso === "menu"){
+
+if(text === "1"){
+
+estados[from].paso = "nombre"
+
+return sock.sendMessage(from,{text:"¿Cuál es tu nombre?"})
+}
+
+if(text === "2"){
+
+const citas = JSON.parse(fs.readFileSync(citasFile))
+
+let horarios = []
+
+for(let h=9; h<19; h++){
+
+let hora = `${h}:00`
+
+let ocupado = citas.find(c=>c.hora === hora)
+
+if(!ocupado){
 horarios.push(hora)
-
-minutos += 45
-
-if(minutos >= 60){
-inicio++
-minutos -= 60
 }
 
 }
 
-return horarios
+return sock.sendMessage(from,{
+text:`Horarios disponibles:\n${horarios.join("\n")}`
+})
+
 }
 
-function obtenerCitas(){
+if(text === "3"){
 
-if(!fs.existsSync("citas.json")){
-return []
+return sock.sendMessage(from,{
+text:`💈 Precios
+
+Corte: $10
+Barba: $5
+Corte + Barba: $15`
+})
+
 }
 
-return JSON.parse(fs.readFileSync("citas.json"))
 }
 
-function guardarCita(cita){
+if(estado.paso === "nombre"){
 
-let citas = obtenerCitas()
+estado.nombre = text
+estado.paso = "hora"
+
+return sock.sendMessage(from,{
+text:"¿Qué hora deseas? (ejemplo 10:00)"
+})
+
+}
+
+if(estado.paso === "hora"){
+
+let citas = JSON.parse(fs.readFileSync(citasFile))
+
+let ocupado = citas.find(c=>c.hora === text)
+
+if(ocupado){
+
+return sock.sendMessage(from,{
+text:"❌ Esa hora ya está ocupada"
+})
+
+}
+
+const cita = {
+nombre: estado.nombre,
+hora: text,
+telefono: from
+}
 
 citas.push(cita)
 
-fs.writeFileSync("citas.json",JSON.stringify(citas,null,2))
-}
+fs.writeFileSync(citasFile, JSON.stringify(citas,null,2))
 
-client.on("qr", qr => {
-qrcode.generate(qr,{small:true})
+delete estados[from]
+
+return sock.sendMessage(from,{
+text:`✅ Cita confirmada
+Hora: ${text}`
 })
-
-client.on("ready", () => {
-console.log("Bot listo 💈")
-})
-
-client.on("message", async msg => {
-
-const texto = msg.body.toLowerCase()
-const numero = msg.from
-
-if(texto === "hola"){
-
-msg.reply(
-`💈 *Barbería*
-
-1️⃣ Agendar cita
-2️⃣ Ver horarios disponibles`
-)
-
-}
-
-if(texto === "1"){
-estados[numero]={paso:"nombre"}
-msg.reply("¿Cuál es tu nombre y apellido?")
-return
-}
-
-if(texto === "2"){
-
-let horarios = generarHorarios()
-let citas = obtenerCitas()
-
-let ocupados = citas.map(c=>c.hora)
-
-let libres = horarios.filter(h=>!ocupados.includes(h))
-
-msg.reply("Horarios disponibles:\n\n"+libres.join("\n"))
-}
-
-if(estados[numero]?.paso==="nombre"){
-
-estados[numero].nombre = msg.body
-estados[numero].paso = "fecha"
-
-msg.reply("¿Para qué día deseas la cita? Escribe así: 2026-03-15")
-
-return
-}
-
-if(estados[numero]?.paso==="fecha"){
-
-estados[numero].fecha = msg.body
-estados[numero].paso = "hora"
-
-let horarios = generarHorarios()
-
-msg.reply("Selecciona la hora:\n\n"+horarios.join("\n"))
-
-return
-}
-
-if(estados[numero]?.paso==="hora"){
-
-let citas = obtenerCitas()
-
-if(citas.find(c=>c.hora===msg.body && c.fecha===estados[numero].fecha)){
-
-msg.reply("❌ Ese horario ya está ocupado")
-return
-}
-
-guardarCita({
-nombre: estados[numero].nombre,
-fecha: estados[numero].fecha,
-hora: msg.body,
-telefono: numero
-})
-
-delete estados[numero]
-
-msg.reply("✅ Cita agendada correctamente")
-
-}
-else{
-
-const respuesta = await openai.chat.completions.create({
-model:"gpt-4o-mini",
-messages:[
-{
-role:"system",
-content:`
-Eres el asistente virtual de una barbería.
-
-Información del negocio:
-
-Corte de cabello: Q20.00 De pende a veces
-Corte + barba: Q30.00
-Barba: Q15.00
-
-Horario de atención:
-9:00 a 19:00
-
-
-Responde siempre de forma corta, amable y profesional.
-Si quieren agendar cita indícales que escriban 1 en el menú.
-Siquieren ver horarios disponibles indícales que escriban 2 en el menú.
-`
-},
-{
-role:"user",
-content: texto
-}
-]
-})
-
-msg.reply(respuesta.choices[0].message.content)
 
 }
 
 })
 
-client.initialize()
-cron.schedule("*/30 * * * *", ()=>{
-
-let citas = obtenerCitas()
-
-let ahora = new Date()
-
-citas.forEach(cita=>{
-
-// lógica de recordatorio aquí
-
-cron.schedule("*/10 * * * *", async ()=>{
-
-let citas = obtenerCitas()
-
-let ahora = new Date()
-
-citas.forEach(async cita =>{
-
-let fechaCita = new Date(cita.fecha+" "+cita.hora)
-
-let diff = fechaCita - ahora
-
-let minutos = diff / 60000
-
-if(minutos > 55 && minutos < 65){
-
-await client.sendMessage(
-cita.telefono,
-`⏰ Recordatorio
-
-Hola ${cita.nombre}
-Tienes una cita hoy a las ${cita.hora} 💈`
-)
-
 }
 
-})
-
-})
-
-})
-
-})
+startBot()
