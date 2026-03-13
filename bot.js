@@ -13,25 +13,29 @@ if (!fs.existsSync(citasFile)) {
 
 async function startBot() {
 
-    const { state, saveCreds } = await useMultiFileAuthState("session")
+const { state, saveCreds } = await useMultiFileAuthState("session")
 
-    const sock = makeWASocket({
-        logger: P({ level: "silent" }),
-        auth: state
-    })
+const sock = makeWASocket({
+    logger: P({ level: "silent" }),
+    auth: state
+})
 
-    sock.ev.on("creds.update", saveCreds)
+if (!sock.authState.creds.registered) {
+
+    const numero = "50212345678"
+
+    const code = await sock.requestPairingCode(numero)
+
+    console.log("Codigo para vincular WhatsApp:")
+    console.log(code)
+
+}
+
+sock.ev.on("creds.update", saveCreds)
 
     sock.ev.on("connection.update", ({ connection, qr }) => {
 
-        if (qr) {
-            console.log("Escanea este QR con WhatsApp")
-            qrcode.generate(qr, { small: true })
-        }
-
-        if (connection === "open") {
-            console.log("Bot conectado a WhatsApp")
-        }
+       
 
     })
 
@@ -86,9 +90,9 @@ async function startBot() {
                 return sock.sendMessage(from, {
                     text: `💈 Precios
 
-Corte: $10
-Barba: $5
-Corte + Barba: $15`
+Corte: Q20.00 A veces depende del tipo de corte
+Barba: Q15.00 A veces depende del tipo de barba
+Corte + Barba: Q30.00 A veces depende del tipo de corte y barba`
                 })
             }
 
