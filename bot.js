@@ -20,18 +20,34 @@ const sock = makeWASocket({
     auth: state
 })
 
-if (!sock.authState.creds.registered) {
+sock.ev.on("connection.update", async (update) => {
 
-    const numero = "50212345678"
+    const { connection } = update
 
-    const code = await sock.requestPairingCode(numero)
+    if (connection === "connecting") {
+        console.log("Conectando a WhatsApp...")
+    }
 
-    console.log("Codigo para vincular WhatsApp:")
-    console.log(code)
+    if (connection === "open") {
+        console.log("Bot conectado a WhatsApp")
+    }
 
-}
+    if (connection === "close") {
+        console.log("Conexion cerrada")
+    }
 
-sock.ev.on("creds.update", saveCreds)
+    if (!sock.authState.creds.registered) {
+
+        const numero = "50232169058"
+
+        const code = await sock.requestPairingCode(numero)
+
+        console.log("Codigo para vincular WhatsApp:")
+        console.log(code)
+
+    }
+
+})
 
     sock.ev.on("connection.update", ({ connection, qr }) => {
 
