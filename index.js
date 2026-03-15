@@ -54,8 +54,14 @@ let userState = {};
 
 // --- INICIO DEL BOT ---
 client.on('qr', qr => {
+    // Esto genera un link para que escanees el QR desde el navegador
+    console.log('--- NUEVO CÓDIGO QR ---');
+    console.log('Copia y pega este link en tu navegador para escanear:');
+    console.log(`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qr)}&size=300x300`);
+    console.log('-----------------------');
+    
+    // Mantenemos este por si acaso, pero el de arriba es el que importa ahora
     qrcode.generate(qr, { small: true });
-    console.log('Escanea el QR para iniciar sesión');
 });
 
 client.on('ready', () => {
